@@ -1,0 +1,31 @@
+[package]
+name = "cherrypie"
+version = "0.1.0"
+edition = "2024"
+description = "Window matching daemon for Linux"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+regex = "1"
+libc = "0.2"
+
+[dependencies.x11rb]
+version = "0.13"
+features = ["randr"]
+optional = true
+
+[features]
+default = ["x11"]
+x11 = ["x11rb"]
+
+[dev-dependencies]
+tempfile = "3"
+toml = "0.8"
+
+[profile.release]
+opt-level = "z"
+strip = true
+lto = true
+panic = "abort"
+codegen-units = 1
