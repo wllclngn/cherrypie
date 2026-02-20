@@ -67,7 +67,36 @@ pub struct X11Backend {
 }
 
 impl X11Backend {
-    pub fn init() -> Result<Self, String> {
+    const RETRY_MAX: u32 = 60;
+    const RETRY_MS: u64 = 500;
+
+    pub fn init(signal_fd: i32) -> Result<Self, String> {
+        for attempt in 0..Self::RETRY_MAX {
+            match Self::try_connect() {
+                Ok(backend) => return Ok(backend),
+                Err(e) => {
+                    if attempt == Self::RETRY_MAX - 1 {
+                        return Err(format!("x11 connect failed after {}s: {}", Self::RETRY_MAX as u64 * Self::RETRY_MS / 1000, e));
+                    }
+                    if attempt == 0 {
+                        eprintln!("[x11] waiting for display...");
+                    }
+                    // Check for shutdown signal between retries
+                    if signal_fd >= 0 {
+                        let mut pfd = libc::pollfd { fd: signal_fd, events: libc::POLLIN, revents: 0 };
+                        if unsafe { libc::poll(&mut pfd, 1, 0) } > 0 {
+                            eprintln!("[x11] received signal during init, exiting");
+                            std::process::exit(0);
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(Self::RETRY_MS));
+                }
+            }
+        }
+        unreachable!()
+    }
+
+    fn try_connect() -> Result<Self, String> {
         let (conn, screen_num) =
             RustConnection::connect(None).map_err(|e| format!("x11 connect: {}", e))?;
 
@@ -117,6 +146,8 @@ impl X11Backend {
     }
 
     pub fn process_events(&self, rules: &[CompiledRule], dry_run: bool) {
+        let mut need_flush = false;
+
         // Apply rules to windows that existed at startup
         let startup = self.pending_startup.take();
         if !startup.is_empty() {
@@ -124,34 +155,49 @@ impl X11Backend {
             for window in startup {
                 self.handle_new_window(window, rules, dry_run);
                 handled.push(window);
+                need_flush = true;
             }
         }
 
-        let mut client_list_changed = false;
+        // Loop: handling new windows involves get_property round-trips.
+        // During those reads, x11rb may buffer additional events from the
+        // socket. If we don't re-drain, those events sit in the internal
+        // queue while poll() sees no socket data and never wakes us.
+        loop {
+            let mut client_list_changed = false;
 
-        while let Some(event) = self.conn.poll_for_event().ok().flatten() {
-            if let x11rb::protocol::Event::PropertyNotify(ev) = event
-                && ev.window == self.root
-                && ev.atom == self.atoms._NET_CLIENT_LIST
-            {
-                client_list_changed = true;
+            while let Some(event) = self.conn.poll_for_event().ok().flatten() {
+                if let x11rb::protocol::Event::PropertyNotify(ev) = event
+                    && ev.window == self.root
+                    && ev.atom == self.atoms._NET_CLIENT_LIST
+                {
+                    client_list_changed = true;
+                }
             }
-        }
 
-        if client_list_changed {
+            if !client_list_changed {
+                break;
+            }
+
             let current = get_client_list(&self.conn, self.root, &self.atoms);
             let mut known = self.known_clients.borrow_mut();
             let mut handled = self.handled.borrow_mut();
 
-            // Find newly added windows (not yet handled)
             for &window in &current {
                 if !known.contains(&window) && !handled.contains(&window) {
                     self.handle_new_window(window, rules, dry_run);
                     handled.push(window);
+                    need_flush = true;
                 }
             }
 
+            // Prune closed windows from handled list to prevent unbounded growth
+            handled.retain(|w| current.contains(w));
             *known = current;
+        }
+
+        if need_flush {
+            let _ = self.conn.flush();
         }
     }
 
@@ -415,8 +461,6 @@ impl X11Backend {
                 &[value],
             );
         }
-
-        let _ = self.conn.flush();
     }
 
     // MONITOR RESOLUTION

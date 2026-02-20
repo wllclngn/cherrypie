@@ -1,6 +1,6 @@
 # cherrypie
 
-"Diane, if you ever get up this way, that cherry pie is worth a stop," Agent Dale Cooper.
+"Diane, if you ever get up this way, that cherry pie is worth a stop."
 
 Window matching daemon for Linux written in Rust. Automatically positions, sizes, and configures windows based on TOML rules with regex matching.
 

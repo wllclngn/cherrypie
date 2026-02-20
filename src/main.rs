@@ -82,7 +82,10 @@ fn main() {
                 std::process::exit(1);
             }
 
-            let wm = match backend::WindowManager::init() {
+            // Signal handling before anything else so shutdown works during init
+            let signal_fd = daemon::setup_signalfd();
+
+            let wm = match backend::WindowManager::init(signal_fd) {
                 Ok(wm) => wm,
                 Err(e) => {
                     eprintln!("[cherrypie] {}", e);
@@ -90,7 +93,7 @@ fn main() {
                 }
             };
 
-            daemon::run(wm, &paths.config_file, dry_run);
+            daemon::run(wm, &paths.config_file, dry_run, signal_fd);
         }
     }
 }

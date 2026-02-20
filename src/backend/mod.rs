@@ -16,13 +16,11 @@ pub struct WindowManager {
 }
 
 impl WindowManager {
-    pub fn init() -> Result<Self, String> {
-        // Wayland detection (future: check WAYLAND_DISPLAY, try wlr backend)
-
-        // X11 fallback
+    pub fn init(signal_fd: i32) -> Result<Self, String> {
+        // X11
         #[cfg(feature = "x11")]
         {
-            match X11Backend::init() {
+            match X11Backend::init(signal_fd) {
                 Ok(b) => {
                     return Ok(Self {
                         backend: Backend::X11(b),

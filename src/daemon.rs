@@ -4,13 +4,23 @@ use crate::backend::WindowManager;
 use crate::config;
 use crate::rules::{self, CompiledRule};
 
-pub fn run(wm: WindowManager, config_path: &Path, dry_run: bool) {
+pub fn setup_signalfd() -> i32 {
+    unsafe {
+        let mut mask: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut mask);
+        libc::sigaddset(&mut mask, libc::SIGTERM);
+        libc::sigaddset(&mut mask, libc::SIGINT);
+        libc::sigprocmask(libc::SIG_BLOCK, &mask, std::ptr::null_mut());
+        libc::signalfd(-1, &mask, libc::SFD_CLOEXEC)
+    }
+}
+
+pub fn run(wm: WindowManager, config_path: &Path, dry_run: bool, signal_fd: i32) {
     let compiled = match load_rules(config_path) {
         Some(r) => r,
         None => return,
     };
 
-    let signal_fd = setup_signalfd();
     let inotify_fd = setup_inotify(config_path);
     let x11_fd = wm.connection_fd();
 
@@ -129,17 +139,6 @@ fn load_rules(config_path: &Path) -> Option<Vec<CompiledRule>> {
             eprintln!("[cherrypie] config error: {}", e);
             None
         }
-    }
-}
-
-fn setup_signalfd() -> i32 {
-    unsafe {
-        let mut mask: libc::sigset_t = std::mem::zeroed();
-        libc::sigemptyset(&mut mask);
-        libc::sigaddset(&mut mask, libc::SIGTERM);
-        libc::sigaddset(&mut mask, libc::SIGINT);
-        libc::sigprocmask(libc::SIG_BLOCK, &mask, std::ptr::null_mut());
-        libc::signalfd(-1, &mask, libc::SFD_CLOEXEC)
     }
 }
 

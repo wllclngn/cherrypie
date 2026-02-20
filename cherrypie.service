@@ -1,11 +1,11 @@
 [Unit]
 Description=cherrypie window matching daemon
-After=graphical-session.target
 
 [Service]
+Environment=DISPLAY=:0
 ExecStart=%h/.local/bin/cherrypie
-Restart=on-failure
-RestartSec=2
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=default.target
